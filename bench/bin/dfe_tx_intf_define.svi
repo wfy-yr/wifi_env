@@ -1,0 +1,18 @@
+// =========================================================================== //
+// Author       : fengyangwu - ASR
+// Last modified: 2020-07-09 15:28
+// Filename     : dfe_tx_intf_define.sv
+// Description  : 
+// =========================================================================== //
+
+//========================= dfe_tx_top_if_rtl    for reuse ====================
+`define DFE_TX_TOP_IF_RTL(instance_if, hierarchy, is_active_na) \
+dfe_tx_top_intf instance_if(.clk     (hierarchy.ch0_dfe_tx_clk), \
+                           .rst     (hierarchy.dfe_tx_rst_n)); \
+always @(instance_if.cfg_toggle) begin \
+    $display("detect dfe_tx_top cfg toggle is %0d", instance_if.cfg_toggle); \
+    if(instance_if.is_active) begin\
+        force  instance_if.pready_riu    =  hierarchy.pready_riu; \
+    end \
+    force  instance_if.cfr_din_vld_0  =  hierarchy.u_wphy_riu_top.u_wphy_riu_dfe_tx0.wphy_cfr.din_vld; \
+end
