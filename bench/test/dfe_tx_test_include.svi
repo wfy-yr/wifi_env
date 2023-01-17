@@ -1,0 +1,5 @@
+//tests file
+`include "dfe_tx_base_test.sv"
+//`include "dfe_tx_common_test.sv"
+//`include "dfe_tx_reg_test.sv"
+//`include "dfe_tx_reset_test.sv"
