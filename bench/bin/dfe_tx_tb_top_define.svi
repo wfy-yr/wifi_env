@@ -1,0 +1,86 @@
+`define HWTOP_HIER hw_top
+`define USING_UVM_METH
+`define DW 32
+
+`define DFE_TX_DUT_CLK_RST_SRC(hierarchy) \
+    reg clk_60M                 ; \
+    reg clk_80M                 ; \
+    reg clk_120M                ; \
+    reg clk_240M                ; \
+    reg clk_480M                ; \
+    reg clk_640M                ; \
+    reg clk_960M                ; \
+    reg clk_3840M               ; \
+    reg rst_n                   ; \
+    initial begin \
+      clk_80M = 0; \
+      forever begin \
+          clk_80M = repeat(24) @(posedge clk_3840M) ~clk_80M; \
+      end \
+    end \
+    initial begin \
+      clk_60M = 0; \
+      forever begin \
+          clk_60M = repeat(32) @(posedge clk_3840M) ~clk_60M; \
+      end \
+    end \
+    initial begin \
+      clk_120M = 0; \
+      forever begin \
+          clk_120M = repeat(16) @(posedge clk_3840M) ~clk_120M; \
+      end \
+    end \
+    initial begin \
+      clk_240M = 0; \
+      forever begin \
+          clk_240M = repeat(8) @(posedge clk_3840M) ~clk_240M; \
+      end \
+    end \
+    initial begin \
+      clk_480M = 0; \
+      forever begin \
+          clk_480M = repeat(4) @(posedge clk_3840M) ~clk_480M; \
+      end \
+    end \
+    initial begin \
+      clk_640M = 0; \
+      forever begin \
+          clk_640M = repeat(3) @(posedge clk_3840M) ~clk_640M; \
+      end \
+    end \
+    initial begin \
+      clk_960M = 0; \
+      forever begin \
+          clk_960M = repeat(2) @(posedge clk_3840M) ~clk_960M; \
+      end \
+    end \
+    initial begin \
+      clk_3840M = 0; \
+      forever begin \
+         #0.1302083333  clk_3840M = ~clk_3840M; \
+      end \
+    end \
+    assign hierarchy.dut.pclk                      = clk_240M; \
+    assign hierarchy.dut.clk                       = clk_480M; \
+    assign hierarchy.dut.ch0_dfe_tx_clk            = clk_240M; \
+    assign hierarchy.dut.ch1_dfe_tx_clk            = clk_240M; \
+    assign hierarchy.dut.dfe_tx_clk                = clk_240M; \
+    initial begin \
+      rst_n        = 0; \
+      #100            ; \
+      rst_n        = 1; \
+    end \
+    assign hierarchy.dut.prst_n                 = rst_n; \
+    assign hierarchy.dut.rst_n                  = rst_n; \
+    assign hierarchy.dut.dfe_tx_rst_n           = rst_n; \
+
+
+`define DFE_TX_FSDB_DUMP_MACRO \
+   initial begin \
+      if($test$plusargs("FSDB")) begin \
+         $fsdbDumpfile("tb_top.fsdb"); \
+         //$fsdbAutoSwitchDumpfile(1000, "tb_top.fsdb", 5); \
+         $fsdbDumpvars(0,hw_top,"+mda"); \
+         $fsdbDumpon; \
+      end \
+   end
