@@ -1,0 +1,31 @@
+`ifdef USING_UVM_METH
+    `define asr_print(INFO) \
+        begin \
+            `uvm_info("",INFO,UVM_NONE) \
+        end
+
+    `define asr_print_error(INFO) \
+        begin \
+            `uvm_error("",INFO) \
+        end
+
+    `define TV_BASE_OBJ uvm_object
+`else
+    `define asr_print(INFO) \
+        begin \
+            string str_tmp; \
+            str_tmp = $psprintf(" [file(%0s),line(%0d)]", `__FILE__,`__LINE__); \
+            str_tmp = {INFO,str_tmp}; \
+            $display(str_tmp); \
+        end
+
+    `define asr_print(INFO) \
+        begin \
+            string str_tmp; \
+            str_tmp = $psprintf(" [file(%0s),line(%0d)]", `__FILE__,`__LINE__); \
+            str_tmp = {"[ERROR]",INFO,str_tmp}; \
+            $display(str_tmp); \
+        end
+
+    `define TV_BASE_OBJ asr_tv_base
+`endif
