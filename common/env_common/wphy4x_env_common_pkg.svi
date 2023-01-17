@@ -1,0 +1,9 @@
+`ifndef WPHY4X_ENV_COMMON_PKG__SVI
+`define WPHY4X_ENV_COMMON_PKG__SVI
+package wphy4x_env_common_pkg;
+    import uvm_pkg::*;
+    import asr_tv_proc_pkg::*;
+
+    `include "wphy4x_top_common_types.sv"
+endpackage : wphy4x_env_common_pkg
+`endif
