@@ -1,0 +1,26 @@
+`ifndef DFE_TX_ENV_PKG__SVI
+`define DFE_TX_ENV_PKG__SVI
+
+`include "uvm_macros.svh"
+`include "dfe_tx_top_intf.svi"
+
+package dfe_tx_env_pkg;
+    import uvm_pkg::*;
+
+    import asr_common_pkg::*;
+    import asr_tv_proc_pkg::*;
+    import wphy4x_env_common_pkg::*;
+
+    typedef class dfe_tx_env_cfg;
+    typedef class dfe_tx_coverage;
+
+    `include "dfe_tx_env_cfg.sv"
+    `include "dfe_tx_coverage.sv"
+    `include "dfe_tx_driver.sv"
+    `include "dfe_tx_monitor.sv"
+    `include "dfe_tx_scb_transformer.sv"
+    `include "dfe_tx_scb.sv"
+    `include "dfe_tx_ref_model.sv"
+    `include "dfe_tx_env.sv"
+endpackage : dfe_tx_env_pkg
+`endif
