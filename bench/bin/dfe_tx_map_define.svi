@@ -1,0 +1,4 @@
+//========================= dfe_tx_top_if_tb    for reuse ====================
+
+`define DFE_TX_TOP_IF_TB(instance_if, subsys) \
+uvm_config_db #(virtual dfe_tx_top_intf)::set(uvm_root::get(), $sformatf("*%s", subsys), "vif", instance_if);
