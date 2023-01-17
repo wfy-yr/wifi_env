@@ -1,0 +1,235 @@
+`ifndef DFE_TX_TOP_INTF__SVI
+`define DFE_TX_TOP_INTF__SVI
+
+
+interface dfe_tx_top_intf( input logic clk, input logic rst);
+    parameter   setup_time = 0ns;
+    parameter   hold_time  = 0ns;
+
+    logic         is_active = 0;
+    logic         cfg_toggle = 0;
+    logic  [31:0] packet;
+
+    logic         scan_mode;
+    logic  [63:0] mem_ema_cfg;
+    
+    logic         pready_riu;
+    logic         psel_riu;
+    logic         penable_riu;
+    logic         pwrite_riu;
+    logic  [15:0] paddr_riu;
+    logic  [31:0] pwdata_riu;
+
+    logic         phy_cfg_tx_ch_bw;
+    logic         phy_cfg_tx_fdac;
+    logic         phy_cfg_tx_p20_pos;
+    logic  [11:0] mdm2riu_tx0_re;
+    logic  [11:0] mdm2riu_tx0_im;
+    logic         mdm2riu_tx0_vld;
+    logic  [11:0] mdm2riu_tx1_re;
+    logic  [11:0] mdm2riu_tx1_im;
+    logic         mdm2riu_tx1_vld;
+
+    logic        dfe_tx_qout_vld_0;
+    logic [11:0] dfe_tx_qout_re_0;
+    logic [11:0] dfe_tx_qout_im_0;
+    logic        dfe_tx_qout_vld_1;
+    logic [11:0] dfe_tx_qout_re_1;
+    logic [11:0] dfe_tx_qout_im_1;
+
+    logic  [4:0] mpif_tx0_rf_gain_idx;
+    logic  [4:0] mpif_tx1_rf_gain_idx;
+    logic  [4:0] mpif_tx0_target_pwridx;
+    logic  [4:0] mpif_tx1_target_pwridx;
+    logic  [8:0] mpif_tx0_dig_gain;
+    logic  [8:0] mpif_tx1_dig_gain;
+
+    logic        mdm2riu_tx_err;
+    logic        mdm2riu_tx0_en;
+    logic        mdm2riu_tx1_en;
+    logic [1:0]  mdm2riu_tx_format;
+    logic [5:0]  mdm2riu_tx_mcs;
+    logic        mdm2riu_tx_sig_bw;
+    logic        mdm2riu_tx_vld_end;
+    logic        mdm2riu_dsss_tx0_vld;
+    logic [6:0]  mdm2riu_dsss_tx0_re;
+    logic [6:0]  mdm2riu_dsss_tx0_im;
+
+    logic        mac2riu_tx_en;
+
+    logic        ad_pll_locked;
+    logic        mac2riu_tb_mode;
+    logic [7:0]  obss_pd_level;
+
+    logic        cfr_din_vld_0;
+    logic [11:0] cfr_din_i_0;
+    logic [11:0] cfr_din_q_0;
+    logic        cfr_dout_vld_0;
+    logic [11:0] cfr_dout_i_0;
+    logic [11:0] cfr_dout_q_0;
+    logic        cfr_din_vld_1;
+    logic [11:0] cfr_din_i_1;
+    logic [11:0] cfr_din_q_1;
+    logic        cfr_dout_vld_1;
+    logic [11:0] cfr_dout_i_1;
+    logic [11:0] cfr_dout_q_1;
+ 
+    logic        nco4_din_vld_0;
+    logic [11:0] nco4_din_re_0;
+    logic [11:0] nco4_din_im_0;
+    logic        nco4_din_vld_1;
+    logic [11:0] nco4_din_re_1;
+    logic [11:0] nco4_din_im_1;
+
+    logic        dgain_qout_vld_0;
+    logic [11:0] dgain_qout_re_0;
+    logic [11:0] dgain_qout_im_0;
+    logic        dgain_qout_vld_1;
+    logic [11:0] dgain_qout_re_1;
+    logic [11:0] dgain_qout_im_1;
+
+    logic        dpd_qout_vld_0;
+    logic [11:0] dpd_qout_re_0;
+    logic [11:0] dpd_qout_im_0;
+    logic        dpd_qout_vld_1;
+    logic [11:0] dpd_qout_re_1;
+    logic [11:0] dpd_qout_im_1;
+
+    logic        iqcomp_qout_vld_0;
+    logic [11:0] iqcomp_qout_re_0;
+    logic [11:0] iqcomp_qout_im_0;
+    logic        iqcomp_qout_vld_1;
+    logic [11:0] iqcomp_qout_re_1;
+    logic [11:0] iqcomp_qout_im_1;
+
+    logic        up3fir3_qout_vld_0;
+    logic [11:0] up3fir3_qout_re_0;
+    logic [11:0] up3fir3_qout_im_0;
+    logic        up3fir3_qout_vld_1;
+    logic [11:0] up3fir3_qout_re_1;
+    logic [11:0] up3fir3_qout_im_1;
+
+    logic        up2fir2_qout_vld_0;
+    logic [11:0] up2fir2_qout_re_0;
+    logic [11:0] up2fir2_qout_im_0;
+    logic        up2fir2_qout_vld_1;
+    logic [11:0] up2fir2_qout_re_1;
+    logic [11:0] up2fir2_qout_im_1;
+
+    logic        iqloft_qout_vld_0;
+    logic [11:0] iqloft_qout_re_0;
+    logic [11:0] iqloft_qout_im_0;
+    logic        iqloft_qout_vld_1;
+    logic [11:0] iqloft_qout_re_1;
+    logic [11:0] iqloft_qout_im_1;
+
+    clocking drvcb @(posedge clk);
+        default input #setup_time output #hold_time;
+        output scan_mode;
+        output mem_ema_cfg;
+        input pready_riu;
+        output psel_riu;
+        output penable_riu;
+        output pwrite_riu;
+        output paddr_riu;
+        output pwdata_riu;
+        output phy_cfg_tx_ch_bw;
+        output phy_cfg_tx_fdac;
+        output phy_cfg_tx_p20_pos;
+        output mdm2riu_tx0_re;
+        output mdm2riu_tx0_im;
+        output mdm2riu_tx0_vld;
+        output mdm2riu_tx1_re;
+        output mdm2riu_tx1_im;
+        output mdm2riu_tx1_vld;
+        output mdm2riu_tx_err;
+        output mdm2riu_tx0_en;
+        output mdm2riu_tx1_en;
+        output mdm2riu_tx_format;
+        output mdm2riu_tx_mcs;
+        output mdm2riu_tx_sig_bw;
+        output mdm2riu_tx_vld_end;
+        output mdm2riu_dsss_tx0_vld;
+        output mdm2riu_dsss_tx0_re;
+        output mdm2riu_dsss_tx0_im;
+        output mac2riu_tx_en;
+        output mpif_tx0_rf_gain_idx;
+        output mpif_tx1_rf_gain_idx;
+        output mpif_tx0_target_pwridx;
+        output mpif_tx1_target_pwridx;
+        output mpif_tx0_dig_gain;
+        output mpif_tx1_dig_gain;
+        output ad_pll_locked;
+        output mac2riu_tb_mode;
+        output obss_pd_level;
+    endclocking : drvcb
+
+    clocking moncb @(posedge clk);
+        default input #setup_time output #hold_time;
+        input dfe_tx_qout_vld_0;
+        input dfe_tx_qout_re_0;
+        input dfe_tx_qout_im_0;
+        input dfe_tx_qout_vld_1;
+        input dfe_tx_qout_re_1;
+        input dfe_tx_qout_im_1;
+        input cfr_din_vld_0;
+        input cfr_din_i_0;
+        input cfr_din_q_0;
+        input cfr_dout_vld_0;
+        input cfr_dout_i_0;
+        input cfr_dout_q_0;
+        input cfr_din_vld_1;
+        input cfr_din_i_1;
+        input cfr_din_q_1;
+        input cfr_dout_vld_1;
+        input cfr_dout_i_1;
+        input cfr_dout_q_1;
+        input nco4_din_vld_0;
+        input nco4_din_re_0;
+        input nco4_din_im_0;
+        input nco4_din_vld_1;
+        input nco4_din_re_1;
+        input nco4_din_im_1;
+        input dgain_qout_vld_0;
+        input dgain_qout_re_0;
+        input dgain_qout_im_0;
+        input dgain_qout_vld_1;
+        input dgain_qout_re_1;
+        input dgain_qout_im_1;
+        input dpd_qout_vld_0;
+        input dpd_qout_re_0;
+        input dpd_qout_im_0;
+        input dpd_qout_vld_1;
+        input dpd_qout_re_1;
+        input dpd_qout_im_1;
+        input iqcomp_qout_vld_0;
+        input iqcomp_qout_re_0;
+        input iqcomp_qout_im_0;
+        input iqcomp_qout_vld_1;
+        input iqcomp_qout_re_1;
+        input iqcomp_qout_im_1;
+        input up3fir3_qout_vld_0;
+        input up3fir3_qout_re_0;
+        input up3fir3_qout_im_0;
+        input up3fir3_qout_vld_1;
+        input up3fir3_qout_re_1;
+        input up3fir3_qout_im_1;
+        input up2fir2_qout_vld_0;
+        input up2fir2_qout_re_0;
+        input up2fir2_qout_im_0;
+        input up2fir2_qout_vld_1;
+        input up2fir2_qout_re_1;
+        input up2fir2_qout_im_1;
+        input iqloft_qout_vld_0;
+        input iqloft_qout_re_0;
+        input iqloft_qout_im_0;
+        input iqloft_qout_vld_1;
+        input iqloft_qout_re_1;
+        input iqloft_qout_im_1;
+    endclocking : moncb
+
+    task reset();
+    endtask
+
+endinterface : dfe_tx_top_intf
+`endif
