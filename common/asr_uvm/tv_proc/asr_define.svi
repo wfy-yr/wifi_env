@@ -19,7 +19,7 @@
             $display(str_tmp); \
         end
 
-    `define asr_print(INFO) \
+    `define asr_print_error(INFO) \
         begin \
             string str_tmp; \
             str_tmp = $psprintf(" [file(%0s),line(%0d)]", `__FILE__,`__LINE__); \
