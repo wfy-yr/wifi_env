@@ -125,11 +125,18 @@ class wifi_tv_dir_trans extends asr_tv_dir_trans;
 endclass : wifi_tv_dir_trans
 
 class wifi_tv_proc extends asr_tv_proc;
+    static wifi_tx_tv_proc m_inst;
     
     function new(input string name="wifi_tv_proc");
         super.new(name);
     endfunction
     
+     static function wifi_tx_tv_proc get();
+        if(m_inst==null)
+           m_inst = new;
+        return m_inst;
+    endfunction
+
     virtual function bit parse_wifi_case_dir(ref wifi_tv_dir_trans dir_q[$],input int tot_pkt=10);
         int _pkt_idx;
         if(sg_is_dir_legal(get_case_path())) begin
