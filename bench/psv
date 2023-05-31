@@ -1,0 +1,1478 @@
+#! /usr/bin/perl -w
+
+# ********************************************************** #
+# **********         Pre-Silicon Validator        ********** #
+# ********************************************************** #
+
+use File::Find;
+use Getopt::Long;
+
+GetOptions ("ip=s"              => \$IP,
+            "unit|u=s"          => \$UNIT,
+            "subdir=s"          => \$SUBDIR,
+            "compile|c"         => \$INCRCMP_EN,
+            "fullcompile"       => \$FULLCMP_EN,
+            "execute|x"         => \$SIM_EN,
+#            "ncdir"             => \$NC_DIR,
+            "pattern|t=s"       => \$PATTERN,
+            "plist|tl=s"        => \$PLIST,
+            "tvlist|tvl=s"      => \$TVLIST,
+            "line_key=s"        => \$LINE_KEY,
+            "rg_ini=s"          => \$RG_INI,
+            "rg_num=s"          => \$RG_NUM,
+            "dut"               => \$DUT,
+            "simdir=s"          => \$SIMDIR,
+            "tmpdir=s"          => \$TMPDIR,
+            "ss"                => \$ss,
+            "cmpdir=s"          => \$CMPDIR,
+            "cdir=s"            => \$CDIR,
+            "bdir=s"            => \$BDIR,
+            "verdi|v"           => \$VERDI,
+            "ssf=s"             => \$SSF,
+            "sswr=s"            => \$SSWR,
+            "fsdb"              => \$FSDB,
+            "gls"               => \$GLS,
+            "sdf"               => \$SDF,
+            "pg"                => \$PG,
+            "fpga"              => \$FPGA,
+            "define=s"          => \@DEF_MACRO,
+            "vcsplus=s"         => \@VCSPLUS,
+            "vcsminus=s"        => \$VCSMINUS,
+            "vcs64"             => \$VCS64,
+            "lint"              => \$LINT,
+            "sg"                => \$SG,
+            "gui"               => \$GUI,
+            "syn"               => \$SYN,
+            "syndir=s"          => \$SYNDIR,
+            "p0"                => \$PASS0,
+            "p1"                => \$PASS1,
+            "p2"                => \$PASS2,
+            "p3"                => \$PASS3,
+            "lvt=i"             => \$LVT,
+            "coverage"          => \$COV,
+            "delfc"             => \$DELFC,
+            "showfc"            => \$SHOWFC,
+            "autocml"           => \$AUTOCML,
+            "cplus"             => \$CPLUS,
+            "sgq"               => \$GRID,
+	        "cpu=s"             => \$CPU_NUM, # define cpu number for parallel elaboration
+	        "qmem=s"            => \$GRID_MEM_SIZE,
+	        "long"              => \$GRID_LONG_RUN,
+	        "email"             => \$GRID_SEND_EMAIL,
+
+            "bg"                => \$BG,
+            "quiet"             => \$QUIET,
+            "libtsmc16"         => \$LIBTSMC16,
+            "seed=s"            => \$SEED,
+            "mix"               => \$MIX,
+            "help"              => \&usage,
+) or &usage;
+
+do {
+print "A unit name must be specified with option [-unit]\n";
+print "Print script usage with option [-help]\n";
+exit;
+} unless ($UNIT or $#ARGV==0);
+
+my $grid = defined($GRID) ? 1 : 0;
+my $cpu_num = 1;
+my $grid_mem_size = defined($GLS) ? (defined($GRID_MEM_SIZE) ? $GRID_MEM_SIZE : 4) : 4;
+my $grid_long_run = defined($GRID_LONG_RUN) ? "120:00:00" : "12:00:00";
+my $grid_send_email = defined($GRID_SEND_EMAIL) ? " -m beas " : " -m n ";
+my $grid_email_user = " -M $ENV{USER}\@asrmicro.com ";
+
+my $grid_default = <<EOF;
+#!/bin/bash
+
+# *** The name of the job
+##\$ -N 
+
+# *** PE environment
+# ***  PE request for asic, Set your number of processors here
+# *** qconf -spl ; qconf -sp <PE_NAME>
+##\$ -pe make 1
+
+# *** Virtual Memory size limt
+##\$ -l vf=12G
+
+#*** Space Sharing for Virtual Memory
+##\$ -l vf=100M
+
+# *** requests a hard CPU time limt of 45 minutes
+##\$ -l h_cpu=0:45:0
+
+#Specifies that your job will run for at most 6 hours.  Default is 12 hours. If you request more than 12 hours, your job will enter the long queue, which has much fewer dedicated resources.
+##\$ -l h_rt=12:00:00
+
+# *** used as the hard file size limit 
+##\$ -l h_fsize=10G
+
+# *** Current working directory ***
+#\$ -cwd
+
+# *** specified in the directory defined by this option
+##\$ -o
+
+# *** Specifies the interpreting Shell
+#\$ -S /bin/tcsh
+
+# *** Priority
+# *** specifies a range of priorities from -1023 to 1024. The higher the number, the higher the priority. The default priority for jobs is zero
+#\$  -p 0
+
+# *** Merge the standard out and standard error to one file
+#\$ -j y
+
+# *** binary executable or a bash script
+#\$ -b y
+
+# *** Send mail at submission and completion of script
+#b: Job start / e: Job end / a: Job fail / s: Job suspend / n: don't send mail
+##\$ -m n
+##\$ -M qianghe\@asrmicro.com
+
+EOF
+
+my $replay_cmd = "psv";
+$replay_cmd = "$replay_cmd -ip=$IP" if($IP);
+$replay_cmd = "$replay_cmd -unit=$UNIT" if($UNIT);
+$replay_cmd = "$replay_cmd -unit=$ARGV[0]" unless($UNIT);
+$replay_cmd = "$replay_cmd -subdir=$SUBDIR" if($SUBDIR);
+$replay_cmd = "$replay_cmd -c" if($INCRCMP_EN);
+$replay_cmd = "$replay_cmd -full" if($FULLCMP_EN);
+$replay_cmd = "$replay_cmd -x" if($SIM_EN);
+#$replay_cmd = "$replay_cmd -pattern=$PATTERN" if($PATTERN);
+#$replay_cmd = "$replay_cmd -plist=$PLIST" if($PLIST);
+$replay_cmd = "$replay_cmd -rg_ini=$RG_INI" if($RG_INI);
+$replay_cmd = "$replay_cmd -rg_num=$RG_NUM" if($RG_NUM);
+$replay_cmd = "$replay_cmd -dut" if($DUT);
+$replay_cmd = "$replay_cmd -simdir=$SIMDIR" if($SIMDIR);
+$replay_cmd = "$replay_cmd -tmpdir=$TMPDIR" if($TMPDIR);
+$replay_cmd = "$replay_cmd -ss" if($ss);
+$replay_cmd = "$replay_cmd -cmpdir=$CMPDIR" if($CMPDIR);
+$replay_cmd = "$replay_cmd -cdir=$CDIR" if($CDIR);
+$replay_cmd = "$replay_cmd -bdir=$BDIR" if($BDIR);
+$replay_cmd = "$replay_cmd -verdi" if($VERDI);
+$replay_cmd = "$replay_cmd -ssf=$SSF" if($SSF);
+$replay_cmd = "$replay_cmd -sswr=$SSWR" if($SSWR);
+$replay_cmd = "$replay_cmd -fsdb" if($FSDB);
+$replay_cmd = "$replay_cmd -gls" if($GLS);
+$replay_cmd = "$replay_cmd -sdf" if($SDF);
+$replay_cmd = "$replay_cmd -pg" if($PG);
+$replay_cmd = "$replay_cmd -fpga" if($FPGA);
+foreach(@DEF_MACRO){
+$replay_cmd = "$replay_cmd -define=$_";
+}
+foreach(@VCSPLUS){
+$replay_cmd = "$replay_cmd -vcsplus=$_";
+}
+$replay_cmd = "$replay_cmd -vcsminus=$VCSMINUS" if($VCSMINUS);
+$replay_cmd = "$replay_cmd -vcs64" if($VCS64);
+$replay_cmd = "$replay_cmd -lint" if($LINT);
+$replay_cmd = "$replay_cmd -sg" if($SG);
+$replay_cmd = "$replay_cmd -gui" if($GUI);
+$replay_cmd = "$replay_cmd -syn" if($SYN);
+$replay_cmd = "$replay_cmd -syndir=$SYNDIR" if($SYNDIR);
+$replay_cmd = "$replay_cmd -p0" if($PASS0);
+$replay_cmd = "$replay_cmd -p1" if($PASS1);
+$replay_cmd = "$replay_cmd -p2" if($PASS2);
+$replay_cmd = "$replay_cmd -p3" if($PASS3);
+$replay_cmd = "$replay_cmd -lvt=$LVT" if($LVT);
+$replay_cmd = "$replay_cmd -coverage" if($COV);
+$replay_cmd = "$replay_cmd -sgq" if($GRID);
+#$replay_cmd = "$replay_cmd -seed=$SEED" if($SEED);
+####Options begin
+$" = "\n";
+$IP = "." unless $IP;
+$UNIT = shift unless $UNIT;
+$SUBDIR = "." unless $SUBDIR;
+$INCRCMP_EN = 0 unless $INCRCMP_EN;
+$FULLCMP_EN = 0 unless $FULLCMP_EN;
+$SIM_EN = 0 unless $SIM_EN;
+$PATTERN = "" unless $PATTERN;
+$PLIST = "" unless $PLIST;
+$RG_INI = 0 unless $RG_INI;
+$RG_NUM = (1+$RG_INI) unless $RG_NUM;
+$SIMDIR = "sim" unless $SIMDIR;
+$TMPDIR = "tmp7" unless $TMPDIR;
+$SYNDIR = "syn" unless $SYNDIR;
+$LVT = 0 unless $LVT;
+$CMPDIR = "compile" unless $CMPDIR;
+$CDIR = "cmodel" unless $CDIR;
+$BDIR = "bench" unless $BDIR;
+$VCS64 = 1;
+$SGQUE = "short:2m:1c" unless $SGQUE;
+$BG = "-background" if $BG;
+###Options end
+
+$defmacro = "";
+$simv_plus_option = "";
+foreach(@DEF_MACRO){
+  $defmacro = "$defmacro +define+$_" if $_;
+} 
+foreach(@VCSPLUS){
+  $simv_plus_option = "$simv_plus_option +$_" if $_;
+}
+
+my $SYNOPSYS_DC_HOME = "$ENV{SYNOPSYS_DC_HOME}";
+my $designware       = "$SYNOPSYS_DC_HOME/dw/sim_ver";
+
+#src
+my $my_proj_path             = "$ENV{PROJ_PATH}"; 
+my $my_proj_common           = "$my_proj_path/common";
+my $my_proj_flist            = "$my_proj_path/flist";
+my $my_proj_src              = "$my_proj_path/src";
+my $my_proj_src_unit         = "$my_proj_src/WLAN_IPs/WPHY_IPs/WPHY4x/WPHY40/src/wlan_phy/$SUBDIR/$UNIT";
+my $my_proj_src_unit_gate    = "$my_proj_src_unit/gate";
+my $my_proj_src_unit_spyg    = "$my_proj_src_unit/spyglass";
+
+#sim
+my $my_proj_sim              = "$my_proj_path/sim";
+my $my_proj_sim_unit         = "$my_proj_sim/verification/WPHY_IPs/WPHY4x/WPHY40/sim/wlan_phy/$UNIT";
+my $my_proj_sim_unit_cmodel  = "$my_proj_sim_unit/$CDIR";
+my $my_proj_sim_unit_pattern = "$my_proj_sim_unit/pattern";
+my $my_proj_sim_unit_bench   = "$my_proj_sim_unit/$BDIR";
+
+#output
+#---sim
+#    |---compile
+#    |---test0
+#    |---test1
+my $my_proj_output           = "/$TMPDIR/$ENV{USER}";
+my $my_proj_output_unit      = "$my_proj_output/$UNIT";
+my $my_proj_output_unit_sim  = "$my_proj_output_unit/$SIMDIR";
+my $my_proj_output_unit_syn  = "$my_proj_output_unit/$SYNDIR";
+my $my_proj_output_unit_spy  = "$my_proj_output_unit/spyglass";
+my $my_proj_output_unit_cmp  = "$my_proj_output_unit_sim/$CMPDIR";
+
+#check src
+(-e $my_proj_src_unit) or warn "$my_proj_src_unit is not exist\n";
+
+#check sim
+(-e "$my_proj_sim_unit") or die "$my_proj_sim_unit is not exist\n";
+(-e "$my_proj_sim_unit_cmodel") or warn "$my_proj_sim_unit_cmodel is not exist\n";
+(-e "$my_proj_sim_unit_pattern") or die "$my_proj_sim_unit_pattern is not exist\n";
+(-e "$my_proj_sim_unit_bench") or die "$my_proj_sim_unit_bench is not exist\n";
+
+#check output
+(-e "$my_proj_output") or mkdir "$my_proj_output";
+(-e "$my_proj_output_unit") or mkdir "$my_proj_output_unit";
+(-e "$my_proj_output_unit_sim") or mkdir "$my_proj_output_unit_sim";
+(-e "$my_proj_output_unit_syn") or mkdir "$my_proj_output_unit_syn";
+(-e "$my_proj_output_unit_spy") or mkdir "$my_proj_output_unit_spy";
+(-e "$my_proj_output_unit_cmp") or mkdir "$my_proj_output_unit_cmp";
+
+#synthesize unit
+&synthesis_routine if $SYN;
+
+#verilog model of standard cell library
+if($IP eq "fpga") {
+   $vlib_list = "$my_proj_path/etc/fpga_cell.f";
+}
+elsif($GLS and $SDF) {
+   $vlib_list = "$my_proj_path/lib/std_lib/vlib.f";
+}
+elsif($PG) {
+   $vlib_list = "$my_proj_path/lib/std_lib/vlib_pg.f";
+}
+else {
+   $vlib_list = "$my_proj_flist/lib/srclist.tsmc";
+}
+
+my %all_pattern_test_paths;
+my %all_pattern_test_names;
+my %all_pattern_test_seeds;
+my %all_pattern_test_optns;
+my %all_pattern_test_replay_cmds;
+my @all_pattern_names;
+my @split_plus_values;
+
+my @cur_pattern_test_paths;
+my @cur_pattern_test_names;
+my @cur_pattern_test_seeds;
+my @cur_pattern_test_optns;
+my @cur_pattern_test_cmds;
+my @cur_pattern_test_cmdmsgs;
+my @cur_pattern_test_job_ids;
+my @cur_pattern_test_job_names;
+my @cur_pattern_test_codemsgs;
+my @cur_pattern_test_replay_cmds;
+
+my $cur_test_path;
+my $cur_test_name;
+my $cur_test_seed;
+my $cur_test_optn;
+my $cur_test_rgid;
+my $cur_test_cmd;
+my $cur_test_job_id;
+my $cur_test_job_name;
+
+my $all_pattern_total_count = 0;
+my $all_pattern_done_count  = 0;
+my $all_pattern_pass_count  = 0;
+my $all_pattern_fail_count  = 0;
+my $pattern_count = 0;
+my $my_proj_sim_unit_srclist;
+my $my_proj_src_unit_srclist;
+
+#detect VCS version for coverage
+#unified coverage db starting from 2010.06
+$ENV{VCS_HOME} =~ /20(\d+)\.(\d+)/;
+my $vcs_year = $1;
+my $vcs_month = $2;
+$uni_cov_db = (($vcs_year==10) && ($vcs_month>=6)) || ($vcs_year>10);
+#only for 2010.06?
+$pre_cp_code_cov_ver = (($vcs_year==10) && ($vcs_month>=6));
+
+if ($vcs_year<10) {
+  if ($VCS64) {
+          $verdi_vcs_pli = "$ENV{VERDI_HOME}/share/PLI/vcs_latest/LINUX64";
+  }
+  else {
+          $verdi_vcs_pli = "$ENV{VERDI_HOME}/share/PLI/vcs_latest/LINUX";
+  }
+}
+else {
+  if ($VCS64) {
+          $verdi_vcs_pli = "$ENV{VERDI_HOME}/share/PLI/VCS/LINUX64";
+  }
+  else {
+          $verdi_vcs_pli = "$ENV{VERDI_HOME}/share/PLI/VCS/LINUX";
+  }
+}
+
+&prepare_patterns;
+&pre_all_pattern_routine;
+
+foreach (@all_pattern_names) {
+    $cur_pattern_base_name  = $_;
+    $cur_pattern_full_name  = "$my_proj_sim_unit_pattern/$_";
+    @cur_pattern_test_paths = @{$all_pattern_test_paths{$cur_pattern_base_name}};
+    @cur_pattern_test_names = @{$all_pattern_test_names{$cur_pattern_base_name}};
+    @cur_pattern_test_seeds = @{$all_pattern_test_seeds{$cur_pattern_base_name}};
+    @cur_pattern_test_optns = @{$all_pattern_test_optns{$cur_pattern_base_name}};
+    @cur_pattern_test_replay_cmds = @{$all_pattern_test_replay_cmds{$cur_pattern_base_name}};
+
+    if($INCRCMP_EN or $FULLCMP_EN) {
+       &clear_cmp_dir;
+
+       if($MIX) {
+          &get_cmp_cmd_mix;
+       }
+       else {
+          &get_cmp_cmd;
+       }
+       &wait_cmp_done;
+    }
+
+    for($rg_id=0;$rg_id<@cur_pattern_test_paths;$rg_id++){
+        $cur_test_path      = "$cur_pattern_test_paths[$rg_id]";
+        $cur_test_name      = "$cur_pattern_test_names[$rg_id]";
+        $cur_test_seed      = "$cur_pattern_test_seeds[$rg_id]";
+        $cur_test_optn      = "$cur_pattern_test_optns[$rg_id]";
+        $cur_test_rgid      = $rg_id;
+
+        if($SIM_EN) {
+           if(`qstat | grep 'run_sim' |wc -l` >80) {
+              $rg_id = $rg_id - 1;
+              sleep(30);
+              next;
+           }
+           &create_test_dir;
+           &get_test_cmd;
+           &run_test_cmd;
+        }
+    }
+    for($rg_id=0;$rg_id<@cur_pattern_test_paths;$rg_id++){
+        $cur_test_path      = "$cur_pattern_test_paths[$rg_id]";
+        $cur_test_name      = "$cur_pattern_test_names[$rg_id]";
+        $cur_test_seed      = "$cur_pattern_test_seeds[$rg_id]";
+        $cur_test_optn      = "$cur_pattern_test_optns[$rg_id]";
+        $cur_test_rgid      = $rg_id;
+        $cur_test_cmd       = $cur_pattern_test_cmds[$rg_id];
+        $cur_test_job_id    = $cur_pattern_test_job_ids[$rg_id];
+
+        if($SIM_EN) {
+           while(`qstat | grep 'run_sim' |wc -l` > 0 && `qstat | grep 'run_sim' |cut -d' ' -f1 |xargs` =~ $cur_test_job_id) { 
+              print "rg_id $rg_id/cur_test_job_id $cur_test_job_id is running\n";
+              sleep(2); 
+           }
+           &wait_test_done;
+           print "$cur_pattern_test_codemsgs[$rg_id]\n";
+           print REPORT "\t$cur_pattern_test_codemsgs[$rg_id]\n";
+        }
+    }
+    $pattern_count++;
+}
+
+
+if($SHOWFC) {
+   print "All avaliable function coverage tests:\n";
+}
+
+&post_all_pattern_routine;
+&coverage_routine if ($COV and $SIM_EN);
+if($VERDI){
+    if($MIX){
+        &verdi_routine_mix;
+    }else{
+        &verdi_routine;
+    }
+}
+&spyglass_routine if ($LINT or $SG); 
+
+#---------------- main routine ended here --------------------------------
+#---------------- sub routines defined below -----------------------------
+sub read_file {
+    my $file_name;
+    my @file_lines;
+
+    $file_name = $_[0];
+    if(-f $file_name) {
+       open FILEID, "$file_name" or die "Cannot open the file $file_name\n";
+       while(<FILEID>) {
+          (/\S+/) or next; #skip blank lines
+          if(/^\s*\#/) { next; }; #skip lines started with '#'
+          if(/^\s*\/\//) { next; }; #skip lines started with '//'
+    	  push(@file_lines, $_);
+       }
+       close FILEID;
+    }
+    return @file_lines;
+}
+
+sub pre_all_pattern_routine {
+    $all_pattern_starttime = gmtime;
+    $all_pattern_starttime =~ s/\s+/_/g;
+    if($SIM_EN) {
+       chdir $my_proj_output_unit_sim or die "Can't change CWD to $my_proj_output_unit_sim\n";
+       open REPORT, ">$UNIT.rpt" or die "Cannot create a report file.\n";
+       open REPLAY_PASS, ">replay_pass" or die "Cannot create replay_pass file.\n";
+       open REPLAY_FAIL, ">replay_fail" or die "Cannot create replay_fail file.\n";
+    }
+}
+
+sub prepare_patterns {
+    $seed = defined($SEED) ? $SEED : `date +%N`;
+    chomp($seed);
+
+    for($rg_id=$RG_INI; $rg_id<$RG_NUM; $rg_id++) {
+        if($PATTERN ne "") {
+           foreach(split(/,/, $PATTERN)) {
+              $app_seed = $seed + $rg_id;
+              push(@{$all_pattern_test_paths{$_}}, "$my_proj_output_unit_sim/$_\_$app_seed");
+              push(@{$all_pattern_test_names{$_}}, "$_\_$app_seed");
+              push(@{$all_pattern_test_seeds{$_}}, "$app_seed");
+              push(@{$all_pattern_test_optns{$_}}, "");
+              push(@{$all_pattern_test_replay_cmds{$_}}, "$replay_cmd -t=$_ -seed=$app_seed");
+              $all_pattern_total_count++;
+           }
+        }
+        if($PLIST ne "") {
+           foreach $line (&read_file("$my_proj_sim_unit_pattern/$PLIST")) {
+              chomp($line);
+
+              if($LINE_KEY ne "" && $line =~ /$LINE_KEY/) {
+                 @split_values = split(",", $line);
+                 if($line =~ /seed=([0-9]*)/) {
+                    $seed = $1;
+                 }
+                 @split_plus_values = split(/\+/, $split_values[1]);
+                 $replay_plus_optns = "";
+                 foreach(@split_plus_values) {
+                    $replay_plus_optns = "$replay_plus_optns -vcsplus \"$_\"";
+                 }
+                 $app_seed = $seed + $rg_id;
+                 push(@{$all_pattern_test_paths{$split_values[0]}}, "$my_proj_output_unit_sim/$split_values[0]\_$app_seed");
+                 push(@{$all_pattern_test_names{$split_values[0]}}, "$split_values[0]\_$app_seed");
+                 push(@{$all_pattern_test_seeds{$split_values[0]}}, "$app_seed");
+                 push(@{$all_pattern_test_optns{$split_values[0]}}, "$split_values[1]");
+                 push(@{$all_pattern_test_replay_cmds{$split_values[0]}}, "$replay_cmd -t=$split_values[0] -seed=$app_seed $replay_plus_optns");
+                 $all_pattern_total_count++;
+              }
+           }
+        }
+        if($TVLIST ne "") {
+            @split_plus_values = split(/\s/, $TVLIST); 
+            print "tvlist: {@split_plus_values}\n";
+            $replay_plus_optns = "";
+            foreach(@split_plus_values) {
+                $replay_plus_optns = "-vcsplus +TV_PATH=\"$_\"";
+                if($_ =~ /case([0-9]+)/i) {
+                    $seed = $1;
+                }
+                $app_seed = $seed + $rg_id;
+                push(@{$all_pattern_test_paths{$PATTERN}}, "$my_proj_output_unit_sim/$PATTERN\_$app_seed");
+                push(@{$all_pattern_test_names{$PATTERN}}, "$PATTERN\_$app_seed");
+                push(@{$all_pattern_test_seeds{$PATTERN}}, "$app_seed");
+                push(@{$all_pattern_test_optns{$PATTERN}}, "+TV_PATH=$_");
+                push(@{$all_pattern_test_replay_cmds{$PATTERN}}, "$replay_cmd -t=$PATTERN -seed=$app_seed $replay_plus_optns");
+                $all_pattern_total_count++;
+            }
+        }
+    }
+
+    if(keys %all_pattern_test_seeds le 0) {
+       push(@{$all_pattern_test_paths{"default"}}, "$my_proj_output_unit_sim/default\_$seed");
+       push(@{$all_pattern_test_names{"default"}}, "default\_$seed");
+       push(@{$all_pattern_test_seeds{"default"}}, "$seed");
+       push(@{$all_pattern_test_optns{"default"}}, ""); 
+    }
+
+    @all_pattern_names = keys %all_pattern_test_seeds;
+    print "Pattern: {@all_pattern_names}\n";
+}
+
+sub call_sge_engine {
+    my $job_path  = $_[0];
+    my $job_file  = $_[1];
+    my $job_name  = $_[2];
+    my $job_cmd   = $_[3];
+    open  $handle_grid_cmd , ">", "$job_file" or die "Error: Open file $job_file for write error!\n";
+    print $handle_grid_cmd $grid_default;
+    print $handle_grid_cmd "hostname\n";
+    print $handle_grid_cmd "hostname > host.txt\n";
+    print $handle_grid_cmd "date >> host.txt\n";
+    print $handle_grid_cmd "ls -l /ARM_28HT/sc7_eac/arm/tsmc/cln28ht/sc7mcpp140z_base_hvt_c30 >> host.txt\n";
+    print $handle_grid_cmd "#\$ -pe make $cpu_num\n";
+    print $handle_grid_cmd "#\$ -l vf=$grid_mem_size"."G\n";
+    print $handle_grid_cmd "#\$ -N $job_name\n";
+    print $handle_grid_cmd "#\$ -now=y\n";
+    print $handle_grid_cmd "#\$ -l h_rt=$grid_long_run\n";
+    print $handle_grid_cmd "#\$ -m n\n";
+    print $handle_grid_cmd "#\$ $grid_email_user\n";
+
+	while (($env_key, $env_value) = each %ENV) {
+	   if (($env_key ne "LS_COLORS") && ($env_key ne "VNCDESKTOP" )) {
+	       print $handle_grid_cmd "export $env_key=\"$env_value\"\n";
+	   }
+	}
+
+    print $handle_grid_cmd "cd $job_path\n"; 
+    print $handle_grid_cmd "$job_cmd\n";
+    close $handle_grid_cmd;
+    chmod (0755, "$job_file");
+}
+
+sub clear_cmp_dir {
+    chdir $my_proj_output_unit_cmp or die "Cannot change CWD to $my_proj_output_unit_cmp.\n";
+
+    $my_proj_sim_unit_srclist = &get_tb_srclist();
+    $my_proj_src_unit_srclist = &get_rtl_srclist();
+    if($INCRCMP_EN) {
+       print  "\nINFO: Incremental compilation...\n";
+       system "\\rm -f compile.log";
+       system "\\rm -f compilelib";
+       system "\\rm -f simv";
+       system "\\rm -f *.dat";
+       system "\\rm -f *.txt";
+    }
+    if($FULLCMP_EN) {
+       print  "\nINFO: Full compilation...\n";
+       system "\\rm -f compile.log";
+       system "\\rm -f compilelib";
+       system "\\rm -rf csrc";
+       system "\\rm -rf simv.daidir";
+       system "\\rm -f simv";
+       system "\\rm -f *.dat";
+       system "\\rm -f *.txt";
+    }
+    if($COV) {
+       system "\\rm -rf simv.cm" if(-d "simv.cm");
+    }
+}
+
+sub get_cmp_cmd {
+	my $env_key; 
+	my $env_value;
+
+    $vcs_cmd = "vcs";
+    #using uvm with vcs
+    $vcs_cmd = "$vcs_cmd -ntb_opts uvm-1.1";
+    $vcs_cmd = "$vcs_cmd +error+1000";
+
+    #using verilog 2001 constructs
+    $vcs_cmd = "$vcs_cmd +v2k";
+
+    #options for accessing verilog libraries
+    $vcs_cmd = "$vcs_cmd -y $designware";
+    $vcs_cmd = "$vcs_cmd +libext+.v";
+    
+    #option for systemverilog
+    $vcs_cmd = "$vcs_cmd -sverilog";
+
+    #options for systemVerilog assertions
+    $vcs_cmd = "$vcs_cmd -assert enable_diag -assert vpiSeqBeginTime -assert vpiSeqFail -assert finish_maxfail=100";
+
+    #options for specify blocks and timing checks
+    $vcs_cmd = "$vcs_cmd +nospecify" unless $GLS;
+
+    #options for negative timing checks
+    $vcs_cmd = "$vcs_cmd +neg_tchk +overlap" if $GLS;
+
+    #options for 64-bit compilation
+    $vcs_cmd = "$vcs_cmd -full64" if $VCS64;
+
+    #options to specify source files and compile-time options in a file
+    $vcs_cmd = "$vcs_cmd -f $my_proj_src_unit_srclist";
+    $vcs_cmd = "$vcs_cmd -f $my_proj_sim_unit_srclist" unless $DUT;
+    $vcs_cmd = "$vcs_cmd -f $vlib_list" if ($vlib_list ne "");
+    $vcs_cmd = "$vcs_cmd -file $cur_pattern_full_name/opts_cmp" if (-e "$cur_pattern_full_name/opts_cmp");
+
+    #options for pli applications
+    $vcs_cmd = "$vcs_cmd +vpi +vcsd";
+
+    #options for different versions of verilog
+    $vcs_cmd = "$vcs_cmd +systemverilogext+.sv+.svh";
+
+    #options for controlling messages, Too few instance port connections, Port connect width mismatch
+    $vcs_cmd = "$vcs_cmd +lint=TFIPC-L";
+    $vcs_cmd = "$vcs_cmd +lint=PCWM";
+
+    #options for licensing
+    $vcs_cmd = "$vcs_cmd +vcs+lic+wait";
+
+    #integrating vcs with verdi
+    $vcs_cmd = "$vcs_cmd -lca -kdb";
+
+    #options to specify the time scale
+    $vcs_cmd = "$vcs_cmd -timescale=1ns/10ps";
+    
+    #general options, specifying a log file
+    $vcs_cmd = "$vcs_cmd -l compile.log";
+
+    #general options, defining a text macro
+    $vcs_cmd = "$vcs_cmd +define+GLS" if $GLS;
+    $vcs_cmd = "$vcs_cmd +define+SDF" if $SDF;
+    $vcs_cmd = "$vcs_cmd +define+TSMC16" if $LIBTSMC16;
+    $vcs_cmd = "$vcs_cmd +define+FPGA+HW_VP+XILINX_MEM" if $FPGA;
+    $vcs_cmd = "$vcs_cmd $defmacro";
+
+    #debug option
+    $vcs_cmd = "$vcs_cmd -debug_all";
+    $vcs_cmd = "$vcs_cmd -debug_access";
+
+    #options for coverage metrics
+    $vcs_cmd = "$vcs_cmd -cm line+cond+fsm+tgl+branch+assert" if $COV;
+    $vcs_cmd = "$vcs_cmd -cm_hier $my_proj_sim_unit_bench/cm_hier" if $COV;
+    $vcs_cmd = "$vcs_cmd -cm_cond tf -cm_cond ports -cm_dir $my_proj_output_unit_cmp/simv" if $COV;
+
+    #message redirect
+    $vcs_cmd = "$vcs_cmd >/dev/null 2>/dev/null" if $QUIET;
+
+    # for a unique job name
+    #srand(time());
+    #my $sg_job_postfix = int(rand(1000));
+
+    if($grid) {
+       &call_sge_engine("$my_proj_output_unit_cmp", "compilelib", "hsvCompilelib", "$vcs_cmd");
+
+       $cur_pattern_cmp_cmd = "qrsh -q asic $my_proj_output_unit_cmp/compilelib";
+    }
+    else{
+       $cur_pattern_cmp_cmd = "$vcs_cmd";
+    }
+
+    print "VCS Compiling Command: $vcs_cmd\n" unless $QUIET;
+    system("$cur_pattern_cmp_cmd");
+}
+
+sub get_cmp_cmd_mix {
+	my $env_key; 
+	my $env_value;
+
+    # for a unique job name
+    srand(time());
+    ##my $sg_job_postfix = int(rand(1000));
+    system "\\rm -f cmp_list" if (-e "cmp_list");
+    open VCS_ARGS, ">cmp_list" or die "\nCould not open cmp_list to write!\n";
+    printf VCS_ARGS " -y $designware \n";
+    #printf VCS_ARGS " -f $flistware/srclist.arm \n";
+    #printf VCS_ARGS " -f $flistware/srclist.fpga \n";
+    printf VCS_ARGS " -f $my_proj_sim_unit_srclist \n";
+    printf VCS_ARGS " -f $my_proj_src_unit_srclist \n" unless $DUT;
+    #printf VCS_ARGS " -f $vlib_list \n" unless ($IP eq "fpga");
+    printf VCS_ARGS " +incdir+$my_proj_src_unit \n";
+    printf VCS_ARGS " +incdir+$my_proj_sim_unit_pattern \n" unless $DUT;
+    printf VCS_ARGS " +incdir+$my_proj_sim_unit_cmodel \n" unless $DUT;
+    printf VCS_ARGS " +incdir+$my_proj_sim_unit_bench/includes \n" unless $DUT;
+    printf VCS_ARGS " +incdir+$designware \n";
+    #printf VCS_ARGS " -cm line+cond+fsm+tgl+branch+assert \n" if $COV;
+    #printf VCS_ARGS " -cm_hier $my_proj_sim_unit_bench/cm_hier" if $COV;
+    #printf VCS_ARGS " -cm_cond tf -cm_cond ports -cm_dir $my_proj_output_unit_cmp/simv" if $COV;
+    close VCS_ARGS;
+
+    $vcs_cmd = "
+        mkdir work
+        echo \"WORK  > default\" > synopsys_sim.setup
+        echo \"default : ./work\" >> synopsys_sim.setup
+        vhdlan -full64 -f /proj/HoopoeL/wa/$ENV{USER}/project/src/WLAN_IPs/WPHY_IPs/WPHY4x/WPHY40/srclist.wlan_dsss_mdm40 -l vhd.log
+        vlogan -full64 -ntb_opts uvm-1.1  -f cmp_list  +libext+.v -sverilog +vpi +vcsd +v2k $defmacro +define+ARM_PROP_DELAY=0 -timescale=1ns/10ps -l comlist.log
+        vcs tb_top hw_top -debug_access+all  -l compile.log -full64 -cc gcc -cpp g++ /tools/Synopsys/vcs-mx_vO-2018.09/etc/uvm-1.1/src/dpi/uvm_dpi.cc /tools/Synopsys/vcs-mx_vO-2018.09/etc/uvm-1.1/src/dpi/uvm_regex.cc -cm line+cond+fsm+tgl+branch+assert -cm_cond tf -cm_cond ports -cm_dir $my_proj_output_unit_cmp/simv
+        ";
+    system "\\rm -f simv";
+    system "\\rm -rf simv.cm" if ($COV && -d "simv.cm");
+
+    if($grid) {
+       &call_sge_engine("$my_proj_output_unit_cmp", "compilelib", "hsvCompilelib", "$vcs_cmd");
+
+       $cur_pattern_cmp_cmd = "qrsh -q asic $my_proj_output_unit_cmp/compilelib";
+    }
+    else{
+       $cur_pattern_cmp_cmd = "$vcs_cmd";
+    }
+
+    print "VCS Compiling Command: $vcs_cmd\n" unless $QUIET;
+    system("$cur_pattern_cmp_cmd");
+}
+
+sub wait_cmp_done {
+    unless(-e "$my_proj_output_unit_cmp/simv") { 
+       sleep(2); 
+    }
+    print "VCS compiling logfile: $my_proj_output_unit_cmp/compile.log\n";
+}
+
+
+sub create_test_dir {
+    my $ucli_do;
+
+    #print "cur_test_path $cur_test_path\n";
+    #print "cur_test_name $cur_test_name\n";
+    #print "cur_test_seed $cur_test_seed\n";
+    #print "cur_test_optn $cur_test_optn\n";
+
+    print REPORT "cur_test_path $cur_test_path\n";
+    print REPORT "cur_test_name $cur_test_name\n";
+    print REPORT "cur_test_seed $cur_test_seed\n";
+    print REPORT "cur_test_optn $cur_test_optn\n";
+
+    if(-e "$cur_test_path") {
+       system "\\rm -rf $cur_test_path/*";
+    }
+    else {
+       mkdir "$cur_test_path"; 
+    }
+    chdir $cur_test_path or die "Cannot change CWD to $cur_test_path.\n";
+
+    #link executable
+    system "\\ln -sf $my_proj_output_unit_cmp/simv";
+    system "\\ln -sf $my_proj_output_unit_cmp/simv.daidir";
+    system "\\ln -sf $my_proj_output_unit_cmp/csrc";
+
+
+    while(<$cur_pattern_full_name/*>) {
+       system "\\ln -sf $_" if (/\.dat|\.hex|\.bin|\.cfg|\.raw|\.txt/ || -d $_);
+    }
+    while(<$my_proj_sim_unit_bench/*>) {
+       system "\\ln -sf $_" if (/\.dat|\.hex|\.bin|\.txt|\.rcf|\.mif/);
+    }
+    while(<$my_proj_src_unit/*>) {
+       system "\\ln -sf $_" if (/\.dat|\.hex|\.bin|\.txt/);
+    }
+    while(<$my_proj_sim_unit_cmodel/*>) {
+       system "\\ln -sf $_" if (/\.dat|\.hex|\.bin|\.raw|\.txt|direct_test*|direct_postpipe_test*|\.pl/);
+    }
+    while(<$my_proj_path/lib/IP/*/rcf/*.dat>) {
+       system "\\ln -sf $_";
+    }
+
+    # for a unique job name
+    #srand(time());
+    #my $sg_job_postfix = int(rand(1000));
+    system("echo 'run' > ucli_script.inc");
+}
+
+sub get_test_cmd {
+    $simv_cmd = "$cur_test_path/simv";
+    #options for licensing
+    $simv_cmd = "$simv_cmd +vcs+lic+wait";
+    #options for controlling messages
+    $simv_cmd = "$simv_cmd +nostdout";
+    #options for simulating native testbenches
+    $simv_cmd = "$simv_cmd +ntb_random_seed=$cur_test_seed";
+    $simv_cmd = "$simv_cmd +ntb_solver_array_size_warn=10000000";
+    $simv_cmd = "$simv_cmd -ucli -do ucli_script.inc +SAVE" if $ss;
+    #options for recording output
+    $simv_cmd = "$simv_cmd -l $cur_pattern_base_name.log";
+    #options for specify blocks and timing checks
+    $simv_cmd = "$simv_cmd +notimingchecks +nospecify" unless $GLS;
+    #option to specify user-defined runtime options in a file
+    $simv_cmd = "$simv_cmd -f $cur_pattern_full_name/opts_run" if (-e "$cur_pattern_full_name/opts_run");
+    $simv_cmd = "$simv_cmd $simv_plus_option";
+    $simv_cmd = "$simv_cmd +UVM_MAX_QUIT_COUNT=1000";
+    $simv_cmd = "$simv_cmd +FSDB" if $FSDB;
+    $simv_cmd = "$simv_cmd $cur_test_optn";
+    $simv_cmd = "$simv_cmd -$VCSMINUS" if $VCSMINUS;
+    #integrating vcs with verdi, Limited Customer Availability (LCA)
+    $simv_cmd = "$simv_cmd -lca" if $COV;
+    #options for coverage metrics
+    $simv_cmd = "$simv_cmd -cm line+cond+fsm+tgl+branch -cm_name $cur_test_name" if $COV;
+    $simv_cmd = "$simv_cmd >/dev/null 2>/dev/null" if $QUIET;
+
+    if($grid) {
+       &call_sge_engine("$cur_test_path", "run_sim", "hsvSIM", "$simv_cmd");
+
+       push(@cur_pattern_test_cmdmsgs, "$simv_cmd");
+       push(@cur_pattern_test_cmds, "qrsh -q asic $cur_test_path/run_sim");
+    }
+    else{
+       push(@cur_pattern_test_cmdmsgs, "$simv_cmd");
+       push(@cur_pattern_test_cmds, "$simv_cmd");
+    }
+}
+
+sub run_test_cmd {
+    $cur_test_cmd    = $cur_pattern_test_cmds[$cur_test_rgid];
+    if($cur_test_rgid+1==@cur_pattern_test_paths) {
+       system("$cur_test_cmd");
+    }
+    else {
+       system("$cur_test_cmd&");
+    }
+
+    do {
+       $cur_test_job_id   = `qstat | tail -n 1 |cut -d' ' -f1`;
+       $cur_test_job_name = `qstat | tail -n 1 |cut -d' ' -f3`;
+       chomp($cur_test_job_id);
+       chomp($cur_test_job_name);
+    }while($cur_test_rgid>0 && "$cur_test_job_id" eq "$cur_pattern_test_job_ids[-1]");
+
+    push(@cur_pattern_test_job_ids,   $cur_test_job_id  );
+    push(@cur_pattern_test_job_names, $cur_test_job_name);
+
+    #print "cur_test_cmd      $cur_test_cmd\n" unless $QUIET;
+    #print "cur_test_job_id   $cur_test_job_id\n";
+    #print "cur_test_job_name $cur_test_job_name\n\n";
+    print REPORT "cur_test_cmd      $cur_test_cmd\n" unless $QUIET;
+    print REPORT "cur_test_job_id   $cur_test_job_id\n";
+    print REPORT "cur_test_job_name $cur_test_job_name\n\n";
+}
+
+sub wait_test_done {
+    unless(-e "$cur_test_path/$cur_pattern_base_name.log") {
+       sleep(2); 
+    }
+    unless(-e "$cur_test_path/$cur_pattern_base_name.log") {
+       $all_pattern_fail_count++;
+       $all_pattern_done_count++;
+       $cur_pattern_test_codemsgs[$cur_test_rgid] = "\t*No_log";
+       $cur_pattern_test_codemsgs[$cur_test_rgid] = "$cur_pattern_test_codemsgs[$cur_test_rgid]\t($all_pattern_done_count/$all_pattern_total_count done)";
+       print REPLAY_FAIL "$cur_pattern_test_replay_cmds[$cur_test_rgid]\n";
+       return 1;
+    }
+    foreach $logline (&read_file("$cur_test_path/$cur_pattern_base_name.log")) {
+       if(($logline =~ /error/i || $logline =~ /uvm_warn/i || $logline =~ /fail/i || $logline =~ /sad/i || $logline =~ /unexpected termination/i) &&
+          $logline !~ /Number of demoted UVM_FATAL reports  :    0/ &&
+          $logline !~ /Number of demoted UVM_ERROR reports  :    0/ &&
+          $logline !~ /Number of demoted UVM_WARNING reports:    0/ &&
+          $logline !~ /Number of caught UVM_FATAL reports   :    0/ &&
+          $logline !~ /Number of caught UVM_ERROR reports   :    0/ &&
+          $logline !~ /Number of caught UVM_WARNING reports :    0/ &&
+          $logline !~ /UVM_ERROR :    0/ &&
+          $logline !~ /UVM_FATAL :    0/ && 
+          $logline !~ /UVM_WARNING :.*/ &&
+          $logline !~ /UVM_WARNING.*MULTVERB.*Multiple .*UVM_NONE.*/ &&  
+          $logline !~ /UVM_WARNING.*Accessing complete register instead.*/ && 
+          $logline !~ /UVM_WARNING.*Register.*has RO fields.*/ && 
+          $logline !~ /UVM_WARNING.*already registered with factory.*/ && 
+          $logline !~ /UVM_WARNING.*does not have a backdoor mechanism available.*/ && 
+          $logline !~ /UVM_WARNING.*Multiple.*arguments provided on the command line.*/ && 
+          $logline !~ /.*error_response_policy.*/ &&
+          $logline !~ /.*master_error_response_policy.*/ &&
+          $logline !~ /.*on_error_ahb_full_enable.*/ &&
+          $logline !~ /.*on_error_ahb_lite_enable.*/ &&
+          $logline !~ /.*nseq_in_second_cycle_error_response_for_single_burst.*/ && 
+          $logline !~ /.*allow_cache_update_on_coherent_error_response.*/ && 
+          $logline !~ /.*flag_cacheline_and_memory_coherency_check_per_xact_as_error.*/ &&  
+          $logline !~ /.*exclusive_monitor_error_control_reg.*/ &&
+          $logline !~ /.*u_sadec_core.*/ && 
+          $logline !~ /.*register_fail:AMBA:AHB_COMMON:signal_valid_hwdata_check.*\n/ && 
+          $logline !~ /.*Register.*is not contained within map.*/ && 
+          $logline !~ /.*In map.*maps to same address as register.*/ && 
+          $logline !~ /.*u_sadec_memories.*/) {                                   
+          $all_pattern_fail_count++;
+          $all_pattern_done_count++;
+          $cur_pattern_test_codemsgs[$cur_test_rgid]  = "*Fail $logline";
+          $cur_pattern_test_codemsgs[$cur_test_rgid] = "$cur_pattern_test_codemsgs[$cur_test_rgid]\t($all_pattern_done_count/$all_pattern_total_count done)";
+          print REPLAY_FAIL "$cur_pattern_test_replay_cmds[$cur_test_rgid]\n";
+          return 1;
+       }
+    }
+    foreach $logline (&read_file("$cur_test_path/$cur_pattern_base_name.log")) {
+       if($logline =~ /REALE_TIMEOUT|time_out/i &&
+          $logline !~ /slave_xact_inactivity_timeout/ &&
+          $logline !~ /master_xact_inactivity_timeout/ &&
+          $logline !~ /slave_pready_timeout/ &&
+          $logline !~ /svt_err_check_stats_cov_pready_timeout_check/ &&
+          $logline !~ /.*watchdog_timeout.*/ && 
+          $logline !~ /.*inactivity_timeout.*/ && 
+          $logline !~ /.*state_timeout.*/ && 
+          $logline !~ /.*xact_timeout.*/) {
+          $all_pattern_fail_count++;
+          $all_pattern_done_count++;
+          $cur_pattern_test_codemsgs[$cur_test_rgid]  = "*Time out";
+          $cur_pattern_test_codemsgs[$cur_test_rgid] = "$cur_pattern_test_codemsgs[$cur_test_rgid]\t($all_pattern_done_count/$all_pattern_total_count done)";
+          print REPLAY_FAIL "$cur_pattern_test_replay_cmds[$cur_test_rgid]\n";
+          return 1;
+       }
+    }
+    foreach $logline (&read_file("$cur_test_path/$cur_pattern_base_name.log")) {
+       if($logline =~ /success|succeed|pass|happy/i) {
+          $all_pattern_pass_count++;
+          $all_pattern_done_count++;
+          $cur_pattern_test_codemsgs[$cur_test_rgid]  = "*Pass";
+          $cur_pattern_test_codemsgs[$cur_test_rgid] = "$cur_pattern_test_codemsgs[$cur_test_rgid]\t($all_pattern_done_count/$all_pattern_total_count done)";
+          print REPLAY_PASS "$cur_pattern_test_replay_cmds[$cur_test_rgid]\n";
+          return 0;
+       }
+    }
+
+    $all_pattern_fail_count++;
+    $all_pattern_done_count++;
+    $cur_pattern_test_codemsgs[$cur_test_rgid] = "*No termination keyword in $cur_pattern_base_name.log \n";
+    $cur_pattern_test_codemsgs[$cur_test_rgid] = "$cur_pattern_test_codemsgs[$cur_test_rgid]\t *Legal termination keyword: \n";
+    $cur_pattern_test_codemsgs[$cur_test_rgid] = "$cur_pattern_test_codemsgs[$cur_test_rgid]\t *success/succeed/pass/happy \n";
+    $cur_pattern_test_codemsgs[$cur_test_rgid] = "$cur_pattern_test_codemsgs[$cur_test_rgid]\t *error/fail/sad \n";
+    $cur_pattern_test_codemsgs[$cur_test_rgid] = "$cur_pattern_test_codemsgs[$cur_test_rgid]\t *timeout \n";
+    $cur_pattern_test_codemsgs[$cur_test_rgid] = "$cur_pattern_test_codemsgs[$cur_test_rgid]\t($all_pattern_done_count/$all_pattern_total_count done)";
+    print REPLAY_FAIL "$cur_pattern_test_replay_cmds[$cur_test_rgid]\n";
+    return 1;
+}
+
+sub post_all_pattern_routine {
+    $all_pattern_endtime = gmtime;
+    $all_pattern_endtime =~ s/\s+/_/g;
+
+    if($SIM_EN) {
+       close REPLAY_PASS;
+       close REPLAY_FAIL;
+
+       print REPORT "======================================================================\n";
+       print REPORT "\t   Pass     :      $all_pattern_pass_count                          \n";
+       print REPORT "\t   Fail     :      $all_pattern_fail_count                          \n";
+       print REPORT "\t------------------------------                                      \n";
+       print REPORT "\t   Total    :      $all_pattern_total_count                         \n";
+       print REPORT "======================================================================\n";
+       print REPORT "\t Start-time :      $all_pattern_starttime                           \n";
+       print REPORT "\t End-time   :      $all_pattern_endtime                             \n";
+       print REPORT "======================================================================\n";
+       close REPORT;
+       
+       print        "======================================================================\n";
+       print        "\t   Pass     :      $all_pattern_pass_count                          \n";
+       print        "\t   Fail     :      $all_pattern_fail_count                          \n";
+       print        "\t------------------------------                                      \n";
+       print        "\t   Total    :      $all_pattern_total_count                         \n";
+       print        "======================================================================\n";
+       
+       if ($all_pattern_fail_count == 0) {
+       print        "   xxxxxxxx          x           x x x       x x x                    \n";
+       print        "  x        x        x x        x       x   x       x     ***   ***    \n";
+       print        "  x        x       x   x       x           x              o     o     \n";
+       print        "  x       x       x     x        x x x       x x x                    \n";
+       print        "  x xxxxx        x xxxxx x             x           x    v         v   \n";
+       print        "  x             x         x    x       x   x       x     v       v    \n";
+       print        "  x            x           x     x x x       x x x         v v v      \n";
+       }
+       else {
+       print        "  x x x x x          x             x       x                          \n";                
+       print        "  x                 x x                    x             ***   ***    \n";
+       print        "  x                x   x           x       x              o     o     \n";
+       print        "  x x x x x       x     x          x       x                          \n";
+       print        "  x              x xxxxx x         x       x               x x x      \n";
+       print        "  x             x         x        x       x             x       x    \n";
+       print        "  x            x           x       x       x x x x x    x         x   \n";
+       }
+       print        "======================================================================\n";
+       print        "\t Start-time :      $all_pattern_starttime                           \n";
+       print        "\t End-time   :      $all_pattern_endtime                             \n";
+       print        "\t compile-log:      $my_proj_output_unit_cmp/compile.log             \n";
+       print        "\t sim-log    :      $cur_test_path/$cur_pattern_base_name.log        \n";
+       print        "\t replay-pass:      $my_proj_output_unit_sim/replay_pass             \n";
+       print        "\t replay-fail:      $my_proj_output_unit_sim/replay_fail             \n";
+       print        "======================================================================\n";
+    }
+}
+
+sub coverage_routine {
+    if(-e "$my_proj_output_unit_cmp/urgReport") {
+       system "rm -rf $my_proj_output_unit_cmp/urgReport";
+    }
+
+    $cm_command = "urg +urg+lic+wait -full64";
+    $cm_command = "$cm_command -dir $my_proj_output_unit_cmp/simv.vdb";
+    $cm_command = "$cm_command -report $my_proj_output_unit_cmp/urgReport -lca -show brief"; 
+    $cm_command = "$cm_command -group flex_merge_drop";
+
+    if(-e "$my_proj_sim_unit_bench/cov_exclude") {
+       $cm_command = "$cm_command -elfile $my_proj_sim_unit_bench/cov_exclude";
+    }
+    print "---------- generating coverage report ----------\n";
+    print "---------- coverage command : $cm_command --------\n"; 
+    system "qrsh -q asic $cm_command";
+    print "---------- goto $my_proj_output_unit_cmp/urgReport for it ------\n"; 
+}
+
+sub spyglass_routine {
+    #set spyglass sgdc files
+    my $my_proj_src_unit_srclist;
+    my $clocks_sgdc = "$my_proj_src_unit_spyg/clocks.sgdc";
+    my $resets_sgdc = "$my_proj_src_unit_spyg/resets.sgdc";
+    my $waive_list  = "$my_proj_src_unit_spyg/spyglass.swl";
+    my $SgRunMode = defined($GUI) ? "-run" : "-batch";
+
+    if($SG) {
+       die "*File $clocks_sgdc not found.\n" unless(-e $clocks_sgdc);
+       die "*File $resets_sgdc not found.\n" unless(-e $resets_sgdc);
+    }
+
+    #go to workspace
+    chdir $my_proj_output_unit_spy or die "Cannot change CWD to $my_proj_output_unit_spy.\n";
+    $my_proj_src_unit_srclist = &get_rtl_srclist();
+
+    $sg_cmd = "spyglass -sgq $SGQUE $SGOPT";
+    $sg_cmd = "$sg_cmd $SgRunMode";
+    $sg_cmd = "$sg_cmd -verilog";
+    $sg_cmd = "$sg_cmd -dw";
+    $sg_cmd = "$sg_cmd -policy=lint"; 
+    $sg_cmd = "$sg_cmd -policy=clock-reset" if $SG; 
+    $sg_cmd = "$sg_cmd -enable_handshake" if $SG;
+    $sg_cmd = "$sg_cmd -ignorelibs"; 
+    $sg_cmd = "$sg_cmd -enableSV"; 
+    $sg_cmd = "$sg_cmd -sgdc $clocks_sgdc" if $SG;
+    $sg_cmd = "$sg_cmd -sgdc $resets_sgdc" if $SG;
+    $sg_cmd = "$sg_cmd -waiver $my_proj_path/etc/spyglass.swl"; 
+    $sg_cmd = "$sg_cmd -waiver $waive_list" if (-f $waive_list);
+    $sg_cmd = "$sg_cmd -report Clock-Reset-Summary" if $SG;
+    $sg_cmd = "$sg_cmd -report Clock-Reset-Detail" if $SG;
+    $sg_cmd = "$sg_cmd -report moresimple";
+    $sg_cmd = "$sg_cmd -y $designware";
+    $sg_cmd = "$sg_cmd -y $my_proj_common";
+    $sg_cmd = "$sg_cmd $my_proj_common/common_defines.v";
+    $sg_cmd = "$sg_cmd -f $my_proj_src_unit_srclist";
+    $sg_cmd = "$sg_cmd -f $vlib_list" if ($vlib_list ne "");
+    $sg_cmd = "$sg_cmd +define+UDLY=#1";
+    $sg_cmd = "$sg_cmd +libext+\".v\"";
+    $sg_cmd = "$sg_cmd -stopdir $designware";
+    while (<$my_proj_path/lib/IP/*/verilog>) {
+    $sg_cmd = "$sg_cmd -stopdir $_";
+    }
+
+    #Spyglass running
+    print "\nSpyglass Command: $sg_cmd\n" unless $QUIET;
+    system "$sg_cmd";
+
+    print "Spyglass reports: $my_proj_output_unit_spy/spyglass_reports/moresimple.rpt\n" unless $QUIET;
+
+    print "****************************************************************\n";
+    print "*      S p y g l a s s    E r r o r    M e s s a g e s         *\n";
+    print "****************************************************************\n";
+    system "grep Error $my_proj_output_unit_spy/spyglass_reports/moresimple.rpt";
+    print "****************************************************************\n";
+    print "*      S p y g l a s s    W a r n i n g    M e s s a g e s     *\n";
+    print "****************************************************************\n";
+    system "grep Warning $my_proj_output_unit_spy/spyglass_reports/moresimple.rpt";
+}
+
+sub verdi_routine {
+    (-e "$cur_test_path") or mkdir "$cur_test_path"; 
+    my $my_proj_sim_unit_srclist;
+    my $my_proj_src_unit_srclist;
+
+    #go to workspace
+    chdir $cur_test_path or die "Cannot change CWD to $cur_test_path.\n";
+    $my_proj_sim_unit_srclist = &get_tb_srclist();
+    $my_proj_src_unit_srclist = &get_rtl_srclist();
+
+    # for a unique job name
+    srand(time());
+    my $sg_job_postfix = int(rand(1000));
+
+
+    $verdi_cmd = "verdi";
+    $verdi_cmd = "$verdi_cmd -ntb_opts uvm-1.1 -debug_all";
+    $verdi_cmd = "$verdi_cmd -uvm -uvmDebug";
+    $verdi_cmd = "$verdi_cmd -ssv -ssy -ssz -nologo";
+    $verdi_cmd = "$verdi_cmd -y $designware";
+    $verdi_cmd = "$verdi_cmd -f $my_proj_flist/lib/srclist.std_lib";
+    $verdi_cmd = "$verdi_cmd -f $my_proj_flist/lib/srclist.mem";
+    $verdi_cmd = "$verdi_cmd -f $my_proj_flist/rtl/srclist.common";
+    $verdi_cmd = "$verdi_cmd -f $my_proj_src_unit_srclist";
+    $verdi_cmd = "$verdi_cmd -f $my_proj_sim_unit_srclist" unless $DUT;
+    $verdi_cmd = "$verdi_cmd -f $vlib_list";
+    $verdi_cmd = "$verdi_cmd +libext+\".v\"";
+    $verdi_cmd = "$verdi_cmd -sverilog";
+    $verdi_cmd = "$verdi_cmd +systemverilogext+\".sv\"";
+    $verdi_cmd = "$verdi_cmd -syntaxerrormax 1000";
+    $verdi_cmd = "$verdi_cmd -ssf $SSF" if $SSF;
+    $verdi_cmd = "$verdi_cmd -sswr $SSWR" if $SSWR;
+    $verdi_cmd = "$verdi_cmd +librescan";
+    $verdi_cmd = "$verdi_cmd $defmacro";
+    $verdi_cmd = "$verdi_cmd +define+GLS" if $GLS;
+    $verdi_cmd = "$verdi_cmd +define+SDF" if $SDF;
+    $verdi_cmd = "$verdi_cmd +define+FPGA+HW_VP+XILINX_MEM" if $FPGA;
+    $verdi_cmd = "$verdi_cmd +define+TSMC16" if $LIBTSMC16;
+    $verdi_cmd = "$verdi_cmd >/dev/null 2>/dev/null" if $QUIET;
+    
+    #invoke Verdi
+    print "\nVerdi Command: $verdi_cmd\n" unless $QUIET;
+    if($grid) {
+       &call_sge_engine("$cur_test_path", "run_verdi", "hsvCompilelib", "$verdi_cmd");
+       my $ret = system ("qrsh -q asic $cur_test_path/run_verdi&");
+    }
+    else{
+       system "$verdi_cmd &";
+    }
+
+    print "Verdi logfile: $cur_test_path/verdiLog/compiler.log\n";
+}
+
+sub verdi_routine_mix {
+    (-e "$cur_test_path") or mkdir "$cur_test_path"; 
+    my $my_proj_sim_unit_srclist;
+    my $my_proj_src_unit_srclist;
+
+    #go to workspace
+    chdir $cur_test_path or die "Cannot change CWD to $cur_test_path.\n";
+    $my_proj_sim_unit_srclist = &get_tb_srclist();
+    $my_proj_src_unit_srclist = &get_rtl_srclist();
+
+    # put all verdi opts to a file to avoid the size too large to run Sungrid
+    system "\\rm -f verdi_cmd_args" if (-e "verdi_cmd_args");
+    open VERDI_ARGS, ">verdi_cmd_args" or die "\nCould not open verdi_cmd_args to write!\n";
+    printf VERDI_ARGS " -y $designware\n";
+    printf VERDI_ARGS " -f $my_proj_src_unit_srclist\n";
+    printf VERDI_ARGS " -f $my_proj_sim_unit_srclist\n" unless $DUT;
+    printf VERDI_ARGS " -f $vlib_list\n" unless ($IP eq "fpga");
+    printf VERDI_ARGS " +incdir+$designware\n";
+    close VERDI_ARGS;
+
+
+    # for a unique job name
+    srand(time());
+    my $sg_job_postfix = int(rand(1000));
+
+    $verdi_cmd = "
+        vhdlcom -nc -2000 -f /proj/HoopoeL/wa/$ENV{USER}/project/src/WLAN_IPs/WPHY_IPs/WPHY4x/WPHY40/srclist.wlan_dsss_mdm40  -quiet -l dut_vhd_lib.log
+        vericom -nc -2001 -f $my_proj_sim_unit_bench/tb.f  -quiet -l dut_lib.log
+        vericom -nc -2001 -sverilog +define+_FAST_CORNER +define+PRE_SIM +v2k +nospecify +lint=TFIPC-L +lint=PCWM +notimingchecks -timescale=100ps/100ps +define+TSENSOR_DUMMY +define+CRANE_NO_UDR +define+noncgdel +define+cgdel +define+AXI64 +define+USE_DEN_SD +define+RTL_SIM +warn=none -q -sverilog -f verdi_cmd_args +systemverilogext+\".sv\"  +systemverilogext+\".svi\" -ntb_opts uvm-1.1 -debug_all -uvm -uvmDebug +libext+\".v\" +libext+\".vhd\" 
+        verdi -ssv -ssy -ssz -nologo -lib work  -top \"hw_top tb_top\""; 
+    
+    #invoke Verdi
+    print "\nVerdi Command: $verdi_cmd\n" unless $QUIET;
+    if($grid) {
+       &call_sge_engine("$cur_test_path", "run_verdi", "hsvCompilelib", "$verdi_cmd");
+       my $ret = system ("qrsh -q asic $cur_test_path/run_verdi&");
+    }
+    else{
+       system "$verdi_cmd &";
+    }
+
+    print "Verdi logfile: $cur_test_path/verdiLog/compiler.log\n";
+}
+
+sub get_tb_srclist {
+    my $current_dir = `pwd`;
+    chomp($current_dir);
+
+    open SRC_FILES, ">tb_srclist" or die "Cannot create a list file.\n";
+    #pattern source files
+    if(-d "$cur_pattern_full_name") {
+       print SRC_FILES "//Pattern source files\n";
+       while(<$cur_pattern_full_name/*>) {
+          if(/\.v$|\.sv$/) {
+             print SRC_FILES "$_\n";
+          }
+          elsif (/\.f$|\.lst$|\.list$/) {
+             foreach $line (&read_file("$_")) {
+                if($line =~ /^\s*\W/) { #absolute path
+                   print SRC_FILES $line;
+                }
+                else { #relative path
+                   print SRC_FILES "$my_proj_path/units/$line";
+                }
+             }
+          }
+          elsif (-f $_ && ($_ !~ /opts_cmp/) && ($_ !~ /opts_run/)) {
+             system "\\ln -sf $_";
+          }
+       }
+    }
+    
+    #testbench source files
+    if(-d $my_proj_sim_unit_bench) {
+       print SRC_FILES "//Testbench source files\n";
+       while(<$my_proj_sim_unit_bench/*>) {
+          if(/\.v$|\.sv$/) {
+             print SRC_FILES "$_\n";
+          }
+          elsif (/\.f$|\.lst$|\.list$|\.clist$/) {
+             if(/\.clist$/){if(!$CPLUS) {next;}};
+             foreach $line (&read_file("$_")) {
+                if($line =~ /^\s*\W/) { #absolute path
+                   print SRC_FILES $line;
+                }
+                else { #relative path
+                   print SRC_FILES "$my_proj_path/units/$line";
+                }
+             }
+          }
+          elsif (-f $_) {
+             system "\\ln -sf $_";
+          }
+       }
+    }
+
+    #c-model source files
+    if((-d $my_proj_sim_unit_cmodel) and ($current_dir eq $my_proj_output_unit_cmp)) {
+       print SRC_FILES "//C-model source files\n";
+       while(<$my_proj_sim_unit_cmodel/*>) {
+          if(/\.c$|\.cc$|\.cpp$/) {
+             print SRC_FILES "$_\n";
+          }
+          elsif(/\.f$|\.lst$|\.list$/) {
+             foreach $line (&read_file("$_")) {
+                if($line =~ /^\s*\W/) {
+                   print SRC_FILES $line;
+                }
+             }
+          }
+          elsif (-f $_) {
+             system "\\ln -sf $_";
+          }
+       }
+    }
+
+    close SRC_FILES;
+    return "$current_dir/tb_srclist";
+}
+
+sub get_rtl_srclist {
+    my $current_dir = `pwd`;
+    my $srcpath = $my_proj_src_unit;
+
+    chomp($current_dir);
+    $srcpath = $my_proj_src_unit_gate if $GLS;
+
+    open SRC_FILES, ">rtl_srclist" or die "Cannot create a list file.\n";
+    #design source files
+    if(-d $srcpath) {
+       while(<$srcpath/*>) {
+          if(/\.v$|\.sv$|\.vn$|\.vg$/) {
+             print SRC_FILES "$_\n";
+          }
+          elsif (/\.f$|\.lst$|\.list$/) {
+             foreach $line (&read_file("$_")) {
+                if($line =~ /^\s*\W/) { #absolute path
+                   print SRC_FILES $line;
+                }
+                else { #relative path
+                   print SRC_FILES "$my_proj_path/units/$line";
+                }
+             }
+          }
+          elsif (-f $_) {
+             system "\\ln -sf $_";
+          }
+       }
+    }
+
+    close SRC_FILES;
+    return "$current_dir/rtl_srclist";
+}
+
+sub parse_vflist {
+    my $vflist = shift;
+    my ($spinfo, $rdrtlinfo);
+    #print "+++> $vflist\n";
+    open my $RTL_LIST, "$vflist";
+    while(<$RTL_LIST>) {
+        $this_line = $_;
+        chop $this_line;
+        $spinfo .= "$1 \\\n" if ($this_line =~ /^\s*\+incdir\+(.*)$/);
+        next if ($this_line =~ /^\s*\#|^\s*\/\//); #skip comment lines: started with # or //
+        $this_line =~ s/\$USER/$ENV{USER}/g;
+        if ($this_line =~ /-f\s+(\S+)/) {
+            ($spinfo, $rdrtlinfo) .= &parse_vflist("$1");
+        }
+        elsif ($this_line =~ /^\s*(\S+\.v)/) { #absolute path
+            $rdrtlinfo .= "$1 \\\n";
+        }
+    }
+    close $RTL_LIST;
+    return ($spinfo, $rdrtlinfo);
+}
+
+sub synthesis_routine {
+    my $syn_scripts = "$my_proj_path/scripts/syn";
+
+    chdir "$my_proj_output_unit_syn" or die "Cannot change CWD to $my_proj_output_unit_syn.\n";
+
+    system "\\ln -sf $syn_scripts/synopsys_dc.setup .synopsys_dc.setup";
+
+    #search for RTL source files
+    open READ_RTL, ">read_rtl.tcl" or die "Cannot create read_rtl.tcl.\n";
+    print READ_RTL "analyze -format verilog [list \\\n";
+    print READ_RTL "$my_proj_common/common_defines.v \\\n";
+    print READ_RTL "/proj/crane/wa/xihuang/venus10/scripts/syn/7T_def.v \\\n";
+    print READ_RTL "/proj/crane/wa/xihuang/project/lib/std_lib/stdcell_macros.v \\\n";
+	#only for modem module level synthesis try
+    while(<$my_proj_common/*.v>) {
+            print READ_RTL "$_ \\\n";
+    }
+    while(<$my_proj_src_unit/*.v>) {
+            print READ_RTL "$_ \\\n";
+    }
+    open SEARCH_PATH, ">search_path.tcl" or die "Cannot create search_path.tcl.\n";
+    print SEARCH_PATH "set search_path [concat \$search_path [list \\\n";
+    print SEARCH_PATH "$my_proj_src_unit \\\n";
+    my ($spinfo, $rdrtlinfo) = &parse_vflist("$my_proj_src_unit/$UNIT.f");
+    print SEARCH_PATH "$spinfo";
+    print READ_RTL "$rdrtlinfo";
+
+	if (open RTL_LIST, "/proj/crane/wa/xihuang/venus10/etc/lib/memory_wrapper.tsmc28lp") {
+            while(<RTL_LIST>) {
+                    $this_line = $_;
+                    chop $this_line;
+                    print SEARCH_PATH "$1 \\\n" if ($this_line =~ /^\s*\+incdir\+(.*)$/);
+                    $this_line = $1 if ($this_line =~ /^\s*-v\s+(.*)$/);
+                    next unless ($this_line =~ /\.v\s*$/); #skip non-verilog file
+                    next if ($this_line =~ /^\s*\#|^\s*\/\//); #skip comment lines: started with # or //
+                    next if ($this_line =~ /^\s*\+|^\s*-/); #skip +/- options for VCS
+                    if ($this_line =~ /^\s*\W/) { #absolute path
+                            print READ_RTL "$this_line \\\n";
+                    }
+                    else { #relative path
+                            print READ_RTL "$my_proj_path/units/$this_line \\\n";
+                    }
+             }
+             close RTL_LIST;
+    }
+    print READ_RTL "]\n";
+    print READ_RTL "elaborate \$DESIGN_TOP\n";
+    print READ_RTL "current_design \$DESIGN_TOP\n";
+    close READ_RTL;
+    print SEARCH_PATH "]]\n";
+    close SEARCH_PATH;
+
+    #search for memory libraries
+    open MEMLIB, ">custom_library.tcl" or die "Cannot create custom_library.tcl.\n";
+    print MEMLIB "set custom_library [list \\\n";
+    while(<$my_proj_path/lib/IP/*/synopsys/*_slow0p945vn10*.db>) {
+            print MEMLIB "$_ \\\n";
+    }
+    print MEMLIB "]";
+    close MEMLIB;
+
+    (-d "$my_proj_output_unit_syn/log") or mkdir "$my_proj_output_unit_syn/log";
+    (-d "$my_proj_output_unit_syn/rpt") or mkdir "$my_proj_output_unit_syn/rpt";
+    (-d "$my_proj_output_unit_syn/out") or mkdir "$my_proj_output_unit_syn/out";
+
+    #$dc_cmd = "dc_shell-xg-t -sgq $SGQUE $SGOPT -x \"";
+    $dc_cmd = "dc_shell-xg-t -x \"";
+    $dc_cmd = "$dc_cmd set DESIGN_PATH $my_proj_src_unit\;";
+    $dc_cmd = "$dc_cmd set DESIGN_TOP $UNIT\;";
+    $dc_cmd = "$dc_cmd set PASS0 $PASS0\;" if $PASS0;
+    $dc_cmd = "$dc_cmd set PASS1 $PASS1\;" if $PASS1;
+    $dc_cmd = "$dc_cmd set PASS2 $PASS2\;" if $PASS2;
+    $dc_cmd = "$dc_cmd set PASS3 $PASS3\;" if $PASS3;
+    $dc_cmd = "$dc_cmd set LVT $LVT\;";
+    $dc_cmd = "$dc_cmd set syn_scripts $syn_scripts\;\"";
+    $dc_cmd = "$dc_cmd -f $syn_scripts/main.scr";
+    $dc_cmd = "$dc_cmd | tee $my_proj_output_unit_syn/log/$UNIT.log";
+
+    print "\nDC Command: $dc_cmd\n";
+    print "Synthesis logfile: $my_proj_output_unit_syn/log/*.log\n";
+    print "Synthesis reports: $my_proj_output_unit_syn/rpt/*.rpt\n";
+    print "Synthesis outputs: $my_proj_output_unit_syn/out/$UNIT.p?vn\n";
+
+
+
+	print "\ndc_shell Command: $dc_cmd\n" unless $QUIET;
+    if($grid) {
+       &call_sge_engine("$my_proj_output_unit_syn", "dccompile", "hsvCompilelib", "$dc_cmd");
+       my $ret = system ("qrsh -q asic $my_proj_output_unit_syn/dccompile");
+    }
+    else{
+       open FO , ">dc_cmd";
+       print FO "$dc_cmd ";
+       close FO;
+       system "$dc_cmd &";
+    }
+    exit;
+}
+
+#help subroutine
+sub usage {
+    print "Usage: psv <unit> [options]\n";
+    print "------------------------------------------------------------------------------------------\n";
+    print "  Options     Value       Descriptions\n";
+    print "------------------------------------------------------------------------------------------\n";
+    print ">> C O M M O N   O P T I O N S                                                            \n";
+    print "------------------------------------------------------------------------------------------\n";
+    print "  -ip         ip          IP name, modem by default. optional digrf4 and soc.\n";
+    print "  -unit       unit        Design unit.\n";
+    print "------------------------------------------------------------------------------------------\n";
+    print ">> V C S    O P T I O N S                                                                 \n";
+    print "------------------------------------------------------------------------------------------\n";
+    print "  -compile                Turn on VCS compile switch (incremental).\n";
+    print "  -fullcomp               Turn on VCS fully compile switch (non-incremental).\n";
+    print "  -execute                Turn on VCS execution switch.\n";
+    print "  -pattern    pattern     Pattern to run. Multiple patterns can be specified with sparator \",\"\n";
+    print "  -plist      file        Pattern list file.\n";
+    print "  -tvlist     file        Pattern list file.\n";
+    print "  -fsdb                   Dump FSDB waveform.\n";
+    print "  -simdir     dir         Simulation directory. \"sim\" by default.\n";
+    print "  -cmpdir     dir         Compilation directory. \"compile\" by default.\n";
+    print "  -cdir       dir         Cmodel directory. \"cmodel\" by default.\n";
+    print "  -gls                    Gate-level simulation.\n";
+    print "  -sdf                    GLS with sdf-annotation.\n";
+    print "  -pg                     Use PG vdd/vss library\n";
+    print "  -define     macro       Define Verilog macro. Multiple macros can be specified with sparator \"+\"\n";
+    print "  -vcsplus    vcsOpt      VCS command-line options with \"+\"\n";
+    print "  -vcsminus   vcsOpt      VCS command-line options with \"-\"\n";
+    print "  -vcs64                  Enable VCS 64-bit mode.\n";
+    print "  -dut                    Compile DUT only.\n";
+    print "------------------------------------------------------------------------------------------\n";
+    print ">> C O V E R A G E    O P T I O N S                                                       \n";
+    print "------------------------------------------------------------------------------------------\n";
+    print "  -coverage               Enable VCS coverage metric.\n";
+    print "  -delfc                  Delete previous function coverage db.\n";
+    print "  -showfc                 Show all valid function coverage db.\n";
+    print "  -autocml                Auto-cumulate function coverage db.\n";
+    print "------------------------------------------------------------------------------------------\n";
+    print ">> V E R D I    O P T I O N S                                                             \n";
+    print "------------------------------------------------------------------------------------------\n";
+    print "  -verdi                  Open Verdi and load fsdb if existence\n";
+    print "  -ssf                    Open waveform window.\n";
+    print "------------------------------------------------------------------------------------------\n";
+    print ">> S P Y G L A S S    O P T I O N S                                                       \n";
+    print "------------------------------------------------------------------------------------------\n";
+    print "  -sg                     Run Spyglass check for Lint and CDC.\n";
+    print "  -lint                   Run Spyglass check for Lint only.\n";
+    print "  -gui                    GUI mode.\n";
+    print "------------------------------------------------------------------------------------------\n";
+    print ">> S Y N T H E S I S    O P T I O N S                                                     \n";
+    print "------------------------------------------------------------------------------------------\n";
+    print "  -syn                    Synthesize unit.\n";
+    print "  -syndir     dir         Synthesis directory, \"syn\" by default.\n";
+    print "  -lvt        perctg      Synthesis constraint of LVT cell percentage, 5% by default\n";
+    print "  -p0                     Pass0.\n";
+    print "  -p1                     Pass1.\n";
+    print "  -p2                     Pass2.\n";
+    print "  -p3                     Pass3.\n";
+    print "------------------------------------------------------------------------------------------\n";
+    print ">> O T H E R    O P T I O N S                                                             \n";
+    print "------------------------------------------------------------------------------------------\n";
+    #print "  -sgq        sgQue       Specify Sungrid queue. \"short\" by default.\n";
+    #print "  -sgopt      sgOpt       Specify Sungrid options\n";
+    print "[ -sgq -cpu xx -qmem xx ]\t\t\t\t\t\t use grid with cpu number and memory size \n";
+    print "[ -long ]\t\t\t\t\t\t\t\t\t Use long queue(120hours) for the task \n";
+
+    print "  -bg                     Run job on background\n";
+    print "  -quiet                  Quiet mode.\n";
+    print "  -help                   Print this manual.\n";
+    print "------------------------------------------------------------------------------------------\n";
+    exit;
+}
